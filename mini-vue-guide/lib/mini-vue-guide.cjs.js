@@ -7,6 +7,7 @@ function createVNode(type, props, children) {
         type,
         props,
         children,
+        component: null,
         key: props && props.key,
         shapeFlag: getShapeFlag(type),
         el: null,
@@ -362,10 +363,10 @@ function normalizeSlotValue(value) {
 }
 
 function createComponentInstance(vnode, parent) {
-    console.log("createComponentInstance,", parent);
     const component = {
         vnode,
         type: vnode.type,
+        next: null,
         setupState: {},
         props: {},
         slots: {},
@@ -449,6 +450,17 @@ function inject(key, defaultValue) {
     }
 }
 
+function shouldUpdateComponent(prevVNode, nextVNode) {
+    const { props: prevProps } = prevVNode;
+    const { props: nextProps } = nextVNode;
+    for (const key in nextProps) {
+        if (nextProps[key] !== prevProps[key]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 //render
 function createAppAPI(render) {
     return function createApp(rootComponent) {
@@ -462,6 +474,32 @@ function createAppAPI(render) {
             },
         };
     };
+}
+
+const queue = [];
+const p = Promise.resolve();
+let isFlushPending = false;
+function nextTick(fn) {
+    return fn ? p.then(fn) : p;
+}
+function queueJobs(job) {
+    if (!queue.includes(job)) {
+        queue.push(job);
+    }
+    queueFlush();
+}
+function queueFlush() {
+    if (isFlushPending)
+        return;
+    isFlushPending = true;
+    nextTick(flushJobs);
+}
+function flushJobs() {
+    isFlushPending = false;
+    let job;
+    while ((job = queue.shift())) {
+        job && job();
+    }
 }
 
 function createRenderer(options) {
@@ -738,9 +776,23 @@ function createRenderer(options) {
         if (!n1) {
             mountComponent(n2, container, parentComponent, anchor);
         }
+        else {
+            updateComponent(n1, n2);
+        }
+    }
+    function updateComponent(n1, n2) {
+        const instance = (n2.component = n1.component);
+        if (shouldUpdateComponent(n1, n2)) {
+            instance.next = n2;
+            instance.update();
+        }
+        else {
+            n2.el = n1.el;
+            n2.vnode = n2;
+        }
     }
     function mountComponent(initialVNode, container, parentComponent, anchor) {
-        const instance = createComponentInstance(initialVNode, parentComponent);
+        const instance = (initialVNode.component = createComponentInstance(initialVNode, parentComponent));
         setupComponent(instance);
         setupRenderEffect(instance, initialVNode, container, anchor);
     }
@@ -760,18 +812,33 @@ function createRenderer(options) {
             }
             else {
                 console.log("update");
+                //需要一个 更新后的vnode
+                const { next, vnode } = instance;
+                if (next) {
+                    next.el = vnode.el;
+                    updateComponentPreRender(instance, next);
+                }
                 const { proxy } = instance;
                 const subTree = instance.render.call(proxy);
                 const preSubTree = instance.subTree;
-                console.log(subTree, preSubTree);
                 instance.subTree = subTree;
                 patch(preSubTree, subTree, container, instance, anchor);
             }
+        }, {
+            scheduler() {
+                console.log("update-scheduler");
+                queueJobs(instance.update);
+            },
         });
     }
     return {
         createApp: createAppAPI(render),
     };
+}
+function updateComponentPreRender(instance, nextVNode) {
+    instance.vnode = nextVNode;
+    instance.next = null;
+    instance.props = nextVNode.props;
 }
 function getSequence(arr) {
     const p = arr.slice();
@@ -863,6 +930,7 @@ exports.createTextVNode = createTextVNode;
 exports.getCurrentInstance = getCurrentInstance;
 exports.h = h;
 exports.inject = inject;
+exports.nextTick = nextTick;
 exports.provide = provide;
 exports.proxyRefs = proxyRefs;
 exports.ref = ref;
