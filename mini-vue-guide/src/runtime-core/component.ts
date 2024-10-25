@@ -9,14 +9,14 @@ export function createComponentInstance(vnode, parent) {
   const component = {
     vnode,
     type: vnode.type,
-    next:null,
+    next: null,
     setupState: {},
     props: {},
     slots: {},
     provides: parent ? parent.provides : {},
     parent,
-    isMounted:false,
-    subTree:{},
+    isMounted: false,
+    subTree: {},
     emit: () => {},
   };
   component.emit = emit.bind(null, component) as any;
@@ -61,9 +61,15 @@ function handleSetupResult(instance, setupResult: any) {
 }
 function finishComponentSetup(instance: any) {
   const Component = instance.type;
-  if (Component.render) {
-    instance.render = Component.render;
+
+  //template
+  if(compiler && !Component.render){
+    if(Component.template){
+      Component.render = compiler(Component.template)
+    }
   }
+
+  instance.render = Component.render;
 }
 
 let currentInstance = null;
@@ -74,4 +80,9 @@ export function getCurrentInstance() {
 
 export function setCurrentInstance(instance) {
   currentInstance = instance;
+}
+
+let compiler;
+export function registerRuntimeCompiler(_compiler) {
+  compiler = _compiler;
 }
